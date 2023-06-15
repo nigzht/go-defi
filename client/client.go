@@ -507,7 +507,39 @@ func (c *UniswapClient) swapTokenToETH(size int64, quoteCurrency coinType, recei
 }
 
 // SwapActions create a new swap action.
-func (c *UniswapClient) SwapActions(size *big.Int, baseCurrency coinType, quoteCurrency coinType) *Actions {
+func (c *UniswapClient) SwapActions(size *big.Int, baseCurrency coinType, quoteCurrency coinType, fee bool) *Actions {
+	var callData []byte
+	var ethersNeeded = big.NewInt(0)
+	if quoteCurrency == ETH {
+		ethersNeeded = size
+		if !fee {
+			callData = swapETHToTokenData(size, baseCurrency)
+		} else {
+			callData = swapETHToTokenDataSupportingFee(size, baseCurrency)
+		}
+
+	} else {
+		if fee {
+			panic("fee on transfer is not supported for token to eth swap")
+		}
+		if baseCurrency == ETH {
+			callData = swapTokenToETHData(size, quoteCurrency)
+		} else {
+			callData = swapTokenToTokenData(size, baseCurrency, quoteCurrency)
+		}
+	}
+
+	return &Actions{
+		Actions: []action{
+			{
+				handlerAddr:  common.HexToAddress(hUniswapAddr),
+				data:         callData,
+				ethersNeeded: ethersNeeded,
+			},
+		},
+	}
+}
+func (c *UniswapClient) SwapActionsSupportingFeeOnTransfer(size *big.Int, baseCurrency coinType, quoteCurrency coinType) *Actions {
 	var callData []byte
 	var ethersNeeded = big.NewInt(0)
 	if quoteCurrency == ETH {
@@ -566,6 +598,19 @@ func swapTokenToTokenData(size *big.Int, baseCurrency coinType, quoteCurrency co
 	data, err := parsed.Pack(
 		"swapExactTokensForTokens", size, big.NewInt(0), []common.Address{
 			CoinToAddressMap[quoteCurrency], CoinToAddressMap[ETH], CoinToAddressMap[baseCurrency]})
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func swapETHToTokenDataSupportingFee(size *big.Int, baseCurrency coinType) []byte {
+	parsed, err := abi.JSON(strings.NewReader(huniswap.HuniswapABI))
+	if err != nil {
+		return nil
+	}
+	data, err := parsed.Pack(
+		"swapExactETHForTokensSupportingFeeOnTransferTokens", size, big.NewInt(0), []common.Address{CoinToAddressMap[ETH], CoinToAddressMap[baseCurrency]})
 	if err != nil {
 		return nil
 	}
@@ -923,9 +968,9 @@ func (c *AaveClient) FlashLoanActions(size *big.Int, coin coinType, actions *Act
 	return &Actions{
 		Actions: []action{
 			{
-				handlerAddr:          common.HexToAddress(hAaveAddr),
-				data:                 flashLoanData,
-				ethersNeeded:         totalEthers,
+				handlerAddr:  common.HexToAddress(hAaveAddr),
+				data:         flashLoanData,
+				ethersNeeded: totalEthers,
 			},
 		},
 	}
